@@ -5,9 +5,8 @@ from collections import defaultdict
 import re
 import requests
 
-st.set_page_config(page_title="ATR Unique Steamers", layout="wide")
-st.title("At The Races – Unique Steamers (≥ 33%)")
-st.caption("Horses that have shortened by at least 33% and are the only such horse in their race")
+st.set_page_config(page_title="MILES Best Daily Value Horses", layout="wide")
+st.title("MILES Best Daily Value Horses")
 
 THRESHOLD = 33.0
 
@@ -28,6 +27,18 @@ def odds_to_decimal(odds_str: str) -> float:
         return float(odds_str) + 1.0
     except Exception:
         return 999.0
+
+
+def looks_like_race(text: str) -> bool:
+    """Return True if the text looks like a race identifier (course + time)."""
+    if not text:
+        return False
+    text = text.strip()
+    if re.search(r"\d{1,2}:\d{2}", text):
+        return True
+    if re.search(r"^[A-Za-z]{2,5}\s+\d", text):
+        return True
+    return False
 
 
 @st.cache_data(ttl=300)
@@ -60,19 +71,14 @@ def parse_steamers(html: str):
     if not html:
         return []
     soup = BeautifulSoup(html, "html.parser")
-    all_tables = soup.find_all("table")
-    
-    # Skip the first table (top steamers summary) to avoid double-counting
-    tables_to_parse = all_tables[1:] if len(all_tables) > 1 else all_tables
-    
     rows = []
-    for table in tables_to_parse:
+    
+    for table in soup.find_all("table"):
         for tr in table.find_all("tr"):
             cells = [td.get_text(strip=True) for td in tr.find_all(["td", "th"])]
             if len(cells) < 4:
                 continue
 
-            # Find the percentage move
             mov = 0.0
             mov_idx = -1
             for i, cell in enumerate(cells):
@@ -85,28 +91,26 @@ def parse_steamers(html: str):
                 continue
 
             horse = cells[0]
-            race = cells[1] if len(cells) > 1 else "Unknown"
+            race = cells[1] if len(cells) > 1 else ""
+            
+            if not looks_like_race(race):
+                continue
+
             last_price = cells[mov_idx - 2] if mov_idx >= 2 else ""
             first_show = cells[mov_idx - 1] if mov_idx >= 1 else ""
 
-            # Only keep if Last Price is shorter than 1st Show
             last_dec = odds_to_decimal(last_price)
             first_dec = odds_to_decimal(first_show)
             if last_dec >= first_dec:
                 continue
 
-            atr = cells[mov_idx + 1] if mov_idx + 1 < len(cells) else ""
-
             rows.append({
                 "Horse": horse,
                 "Race": race,
                 "Last Price": last_price,
-                "1st Show": first_show,
                 "Mov %": mov,
-                "ATR Index": atr,
             })
 
-    # Deduplicate
     seen = set()
     unique_rows = []
     for r in rows:
@@ -139,25 +143,21 @@ with col1:
 with col2:
     st.info("Data is cached for 5 minutes. Click Refresh to force a new scrape.")
 
-with st.spinner("Fetching via Spider.cloud..."):
+with st.spinner("Fetching latest data..."):
     html = scrape_with_spider()
 
 if "diag" in st.session_state:
     st.caption(st.session_state["diag"])
 
 if not html:
-    st.error("Could not retrieve page content from Spider.")
+    st.error("Could not retrieve page content.")
     st.stop()
 
 raw_rows = parse_steamers(html)
 unique_steamers = filter_unique_shorteners(raw_rows)
 
-st.subheader(f"Unique Steamers (≥ {THRESHOLD}%)")
-st.metric("Horses found", len(unique_steamers))
-
 if unique_steamers:
-    df = pd.DataFrame(unique_steamers)
-    df["Mov %"] = df["Mov %"].map(lambda x: f"{x:.1f}%")
+    df = pd.DataFrame(unique_steamers)[["Horse", "Race", "Last Price"]]
     st.dataframe(
         df,
         use_container_width=True,
@@ -165,17 +165,17 @@ if unique_steamers:
         column_config={
             "Horse": st.column_config.TextColumn("Horse", width="large"),
             "Race": st.column_config.TextColumn("Race"),
-            "Mov %": st.column_config.TextColumn("Shortened by"),
+            "Last Price": st.column_config.TextColumn("Last Price"),
         }
     )
     csv = df.to_csv(index=False).encode("utf-8")
-    st.download_button("Download CSV", csv, "unique_steamers.csv", "text/csv")
+    st.download_button("Download CSV", csv, "best_value_horses.csv", "text/csv")
 else:
-    st.warning("No unique steamers matching the criteria found right now.")
+    st.warning("No matching horses found right now.")
 
-with st.expander("Raw steamers parsed (for debugging)"):
+with st.expander("Raw parsed rows (for debugging)"):
     if raw_rows:
         st.dataframe(pd.DataFrame(raw_rows), use_container_width=True)
     else:
-        st.write("No steamer rows parsed.")
+        st.write("No rows parsed.")
         st.write("Page length:", len(html))
