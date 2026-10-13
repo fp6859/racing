@@ -5,7 +5,11 @@ from collections import defaultdict
 import re
 import requests
 
-st.set_page_config(page_title="MILES Best Daily Value Horses", layout="wide")
+st.set_page_config(
+    page_title="MILES Horse racing",
+    page_icon="🏇",
+    layout="wide"
+)
 st.title("MILES Best Daily Value Horses")
 
 THRESHOLD = 33.0
