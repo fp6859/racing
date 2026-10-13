@@ -13,18 +13,27 @@ st.caption("Horses that have shortened by at least 33% and are the only such hor
 
 THRESHOLD = 33.0
 
-# ---------- Playwright browser install helper (needed on Streamlit Cloud) ----------
+# ---------- Playwright browser install helper ----------
 def ensure_playwright_browsers():
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             browser.close()
+            return True
     except Exception:
-        st.info("Installing Playwright Chromium (first run only)...")
-        subprocess.check_call([sys.executable, "-m", "playwright", "install", "chromium"])
-        st.success("Chromium installed. Reloading...")
-        st.rerun()
+        try:
+            st.info("Installing Chromium… this may take a minute on first run.")
+            subprocess.check_call(
+                [sys.executable, "-m", "playwright", "install", "chromium"],
+                timeout=300
+            )
+            st.success("Chromium installed. Reloading…")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Could not install Playwright browsers: {e}")
+            st.stop()
+    return False
 
 ensure_playwright_browsers()
 from playwright.sync_api import sync_playwright
