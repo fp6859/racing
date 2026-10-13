@@ -60,8 +60,13 @@ def parse_steamers(html: str):
     if not html:
         return []
     soup = BeautifulSoup(html, "html.parser")
+    all_tables = soup.find_all("table")
+    
+    # Skip the first table (top steamers summary) to avoid double-counting
+    tables_to_parse = all_tables[1:] if len(all_tables) > 1 else all_tables
+    
     rows = []
-    for table in soup.find_all("table"):
+    for table in tables_to_parse:
         for tr in table.find_all("tr"):
             cells = [td.get_text(strip=True) for td in tr.find_all(["td", "th"])]
             if len(cells) < 4:
