@@ -3,9 +3,7 @@ import pandas as pd
 from bs4 import BeautifulSoup
 from collections import defaultdict
 import re
-import os
-import subprocess
-import sys
+import requests
 
 st.set_page_config(page_title="ATR Unique Steamers", layout="wide")
 st.title("At The Races – Unique Steamers (≥ 33%)")
@@ -13,67 +11,30 @@ st.caption("Horses that have shortened by at least 33% and are the only such hor
 
 THRESHOLD = 33.0
 
-# ---------- Playwright browser install helper ----------
-def ensure_playwright_browsers():
-    try:
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            browser.close()
-            return True
-    except Exception:
-        try:
-            st.info("Installing Chromium… this may take a minute on first run.")
-            subprocess.check_call(
-                [sys.executable, "-m", "playwright", "install", "chromium"],
-                timeout=300
-            )
-            st.success("Chromium installed. Reloading…")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Could not install Playwright browsers: {e}")
-            st.stop()
-    return False
-
-ensure_playwright_browsers()
-from playwright.sync_api import sync_playwright
-
-# ---------- Scraping ----------
 @st.cache_data(ttl=300)
-def scrape_market_movers():
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            viewport={"width": 1920, "height": 1080},
-            locale="en-GB",
-        )
-        page = context.new_page()
-        try:
-            page.goto("https://www.attheraces.com/market-movers", timeout=120000, wait_until="networkidle")
-            page.wait_for_timeout(8000)
-            try:
-                page.wait_for_selector("table", timeout=15000)
-            except Exception:
-                pass
-            try:
-                page.click("button:has-text('Accept')", timeout=5000)
-                page.wait_for_timeout(2000)
-            except Exception:
-                pass
-            html = page.content()
-            # Diagnostic info
-            soup_diag = BeautifulSoup(html, "html.parser")
-            table_count = len(soup_diag.find_all("table"))
-            percent_count = html.count("%")
-            st.session_state["diag"] = f"Tables found: {table_count} | % signs: {percent_count} | Length: {len(html)}"
-        except Exception as e:
-            st.error(f"Failed to load page: {e}")
-            html = ""
-            st.session_state["diag"] = str(e)
-        finally:
-            browser.close()
-    return html
+def scrape_with_spider():
+    """Use Spider.cloud free (keyless) scrape endpoint."""
+    url = "https://api.spider.cloud/scrape"
+    payload = {
+        "url": "https://www.attheraces.com/market-movers",
+        "return_format": "html",          # or "markdown"
+        "request": "browser",             # force browser rendering
+        "proxy_enabled": True,
+    }
+    try:
+        response = requests.post(url, json=payload, timeout=90)
+        response.raise_for_status()
+        data = response.json()
+        if isinstance(data, list) and len(data) > 0:
+            html = data[0].get("content", "")
+            st.session_state["diag"] = f"Spider status: {data[0].get('status')} | Length: {len(html)}"
+            return html
+        else:
+            st.session_state["diag"] = f"Unexpected response: {data}"
+            return ""
+    except Exception as e:
+        st.session_state["diag"] = f"Spider error: {e}"
+        return ""
 
 
 def parse_steamers(html: str):
@@ -141,14 +102,14 @@ with col1:
 with col2:
     st.info("Data is cached for 5 minutes. Click Refresh to force a new scrape.")
 
-with st.spinner("Scraping At The Races Market Movers..."):
-    html = scrape_market_movers()
+with st.spinner("Fetching via Spider.cloud..."):
+    html = scrape_with_spider()
 
 if "diag" in st.session_state:
     st.caption(st.session_state["diag"])
 
 if not html:
-    st.error("Could not retrieve page content. The site may be blocking automated access.")
+    st.error("Could not retrieve page content from Spider.")
     st.stop()
 
 raw_rows = parse_steamers(html)
@@ -179,5 +140,5 @@ with st.expander("Raw steamers parsed (for debugging)"):
     if raw_rows:
         st.dataframe(pd.DataFrame(raw_rows), use_container_width=True)
     else:
-        st.write("No steamer rows parsed. The page structure may have changed.")
+        st.write("No steamer rows parsed.")
         st.write("Page length:", len(html))
