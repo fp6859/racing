@@ -60,14 +60,9 @@ def scrape_with_spider():
         response.raise_for_status()
         data = response.json()
         if isinstance(data, list) and len(data) > 0:
-            html = data[0].get("content", "")
-            st.session_state["diag"] = f"Spider status: {data[0].get('status')} | Length: {len(html)}"
-            return html
-        else:
-            st.session_state["diag"] = f"Unexpected response: {data}"
-            return ""
-    except Exception as e:
-        st.session_state["diag"] = f"Spider error: {e}"
+            return data[0].get("content", "")
+        return ""
+    except Exception:
         return ""
 
 
@@ -150,9 +145,6 @@ with col2:
 with st.spinner("Fetching latest data..."):
     html = scrape_with_spider()
 
-if "diag" in st.session_state:
-    st.caption(st.session_state["diag"])
-
 if not html:
     st.error("Could not retrieve page content.")
     st.stop()
@@ -176,10 +168,3 @@ if unique_steamers:
     st.download_button("Download CSV", csv, "best_value_horses.csv", "text/csv")
 else:
     st.warning("No matching horses found right now.")
-
-with st.expander("Raw parsed rows (for debugging)"):
-    if raw_rows:
-        st.dataframe(pd.DataFrame(raw_rows), use_container_width=True)
-    else:
-        st.write("No rows parsed.")
-        st.write("Page length:", len(html))
