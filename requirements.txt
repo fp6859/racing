@@ -1,4 +1,4 @@
 streamlit
-playwright==1.49.0
+playwright
 beautifulsoup4
 pandas
