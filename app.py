@@ -44,20 +44,33 @@ def scrape_market_movers():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            viewport={"width": 1920, "height": 1080},
+            locale="en-GB",
         )
         page = context.new_page()
         try:
-            page.goto("https://www.attheraces.com/market-movers", timeout=90000)
-            page.wait_for_timeout(6000)
+            page.goto("https://www.attheraces.com/market-movers", timeout=120000, wait_until="networkidle")
+            page.wait_for_timeout(8000)
             try:
-                page.click("button:has-text('Accept')", timeout=4000)
+                page.wait_for_selector("table", timeout=15000)
+            except Exception:
+                pass
+            try:
+                page.click("button:has-text('Accept')", timeout=5000)
+                page.wait_for_timeout(2000)
             except Exception:
                 pass
             html = page.content()
+            # Diagnostic info
+            soup_diag = BeautifulSoup(html, "html.parser")
+            table_count = len(soup_diag.find_all("table"))
+            percent_count = html.count("%")
+            st.session_state["diag"] = f"Tables found: {table_count} | % signs: {percent_count} | Length: {len(html)}"
         except Exception as e:
             st.error(f"Failed to load page: {e}")
             html = ""
+            st.session_state["diag"] = str(e)
         finally:
             browser.close()
     return html
@@ -68,15 +81,11 @@ def parse_steamers(html: str):
         return []
     soup = BeautifulSoup(html, "html.parser")
     rows = []
-
-    # Look for any table that might contain mover data
     for table in soup.find_all("table"):
         for tr in table.find_all("tr"):
             cells = [td.get_text(strip=True) for td in tr.find_all(["td", "th"])]
             if len(cells) < 4:
                 continue
-
-            # Try to find a percentage in any cell
             mov = 0.0
             mov_idx = -1
             for i, cell in enumerate(cells):
@@ -87,14 +96,11 @@ def parse_steamers(html: str):
                     break
             if mov <= 0 or mov_idx == -1:
                 continue
-
-            # Heuristic: horse is usually first cell, race second or third
             horse = cells[0]
             race = cells[1] if len(cells) > 1 else "Unknown"
             last_price = cells[mov_idx - 2] if mov_idx >= 2 else ""
             first_show = cells[mov_idx - 1] if mov_idx >= 1 else ""
             atr = cells[mov_idx + 1] if mov_idx + 1 < len(cells) else ""
-
             rows.append({
                 "Horse": horse,
                 "Race": race,
@@ -103,8 +109,6 @@ def parse_steamers(html: str):
                 "Mov %": mov,
                 "ATR Index": atr,
             })
-
-    # Deduplicate roughly by horse+race
     seen = set()
     unique_rows = []
     for r in rows:
@@ -139,6 +143,9 @@ with col2:
 
 with st.spinner("Scraping At The Races Market Movers..."):
     html = scrape_market_movers()
+
+if "diag" in st.session_state:
+    st.caption(st.session_state["diag"])
 
 if not html:
     st.error("Could not retrieve page content. The site may be blocking automated access.")
