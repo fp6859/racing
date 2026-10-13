@@ -11,14 +11,33 @@ st.caption("Horses that have shortened by at least 33% and are the only such hor
 
 THRESHOLD = 33.0
 
+def odds_to_decimal(odds_str: str) -> float:
+    """Convert fractional odds (or Evens) to decimal. Returns large number if unparsable."""
+    if not odds_str:
+        return 999.0
+    odds_str = odds_str.strip().lower()
+    if odds_str in ("evens", "evs", "1/1"):
+        return 2.0
+    if "/" in odds_str:
+        try:
+            num, den = odds_str.split("/")
+            return float(num) / float(den) + 1.0
+        except Exception:
+            return 999.0
+    try:
+        return float(odds_str) + 1.0
+    except Exception:
+        return 999.0
+
+
 @st.cache_data(ttl=300)
 def scrape_with_spider():
     """Use Spider.cloud free (keyless) scrape endpoint."""
     url = "https://api.spider.cloud/scrape"
     payload = {
         "url": "https://www.attheraces.com/market-movers",
-        "return_format": "html",          # or "markdown"
-        "request": "browser",             # force browser rendering
+        "return_format": "html",
+        "request": "browser",
         "proxy_enabled": True,
     }
     try:
@@ -47,6 +66,8 @@ def parse_steamers(html: str):
             cells = [td.get_text(strip=True) for td in tr.find_all(["td", "th"])]
             if len(cells) < 4:
                 continue
+
+            # Find the percentage move
             mov = 0.0
             mov_idx = -1
             for i, cell in enumerate(cells):
@@ -57,11 +78,20 @@ def parse_steamers(html: str):
                     break
             if mov <= 0 or mov_idx == -1:
                 continue
+
             horse = cells[0]
             race = cells[1] if len(cells) > 1 else "Unknown"
             last_price = cells[mov_idx - 2] if mov_idx >= 2 else ""
             first_show = cells[mov_idx - 1] if mov_idx >= 1 else ""
+
+            # Only keep if Last Price is shorter than 1st Show
+            last_dec = odds_to_decimal(last_price)
+            first_dec = odds_to_decimal(first_show)
+            if last_dec >= first_dec:
+                continue
+
             atr = cells[mov_idx + 1] if mov_idx + 1 < len(cells) else ""
+
             rows.append({
                 "Horse": horse,
                 "Race": race,
@@ -70,6 +100,8 @@ def parse_steamers(html: str):
                 "Mov %": mov,
                 "ATR Index": atr,
             })
+
+    # Deduplicate
     seen = set()
     unique_rows = []
     for r in rows:
