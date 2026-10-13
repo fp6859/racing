@@ -68,32 +68,51 @@ def parse_steamers(html: str):
         return []
     soup = BeautifulSoup(html, "html.parser")
     rows = []
+
+    # Look for any table that might contain mover data
     for table in soup.find_all("table"):
-        headers = [th.get_text(strip=True).lower() for th in table.find_all("th")]
-        if not any(h in " ".join(headers) for h in ["horse", "mov", "price", "race"]):
-            continue
-        for tr in table.find_all("tr")[1:]:
-            cells = [td.get_text(strip=True) for td in tr.find_all("td")]
-            if len(cells) < 5:
+        for tr in table.find_all("tr"):
+            cells = [td.get_text(strip=True) for td in tr.find_all(["td", "th"])]
+            if len(cells) < 4:
                 continue
+
+            # Try to find a percentage in any cell
+            mov = 0.0
+            mov_idx = -1
+            for i, cell in enumerate(cells):
+                match = re.search(r"([\d.]+)\s*%", cell)
+                if match:
+                    mov = float(match.group(1))
+                    mov_idx = i
+                    break
+            if mov <= 0 or mov_idx == -1:
+                continue
+
+            # Heuristic: horse is usually first cell, race second or third
             horse = cells[0]
             race = cells[1] if len(cells) > 1 else "Unknown"
-            last_price = cells[2] if len(cells) > 2 else ""
-            first_show = cells[3] if len(cells) > 3 else ""
-            mov_text = cells[4] if len(cells) > 4 else "0%"
-            atr = cells[5] if len(cells) > 5 else ""
-            mov_match = re.search(r"([\d.]+)\s*%", mov_text)
-            mov = float(mov_match.group(1)) if mov_match else 0.0
-            if mov > 0:
-                rows.append({
-                    "Horse": horse,
-                    "Race": race,
-                    "Last Price": last_price,
-                    "1st Show": first_show,
-                    "Mov %": mov,
-                    "ATR Index": atr,
-                })
-    return rows
+            last_price = cells[mov_idx - 2] if mov_idx >= 2 else ""
+            first_show = cells[mov_idx - 1] if mov_idx >= 1 else ""
+            atr = cells[mov_idx + 1] if mov_idx + 1 < len(cells) else ""
+
+            rows.append({
+                "Horse": horse,
+                "Race": race,
+                "Last Price": last_price,
+                "1st Show": first_show,
+                "Mov %": mov,
+                "ATR Index": atr,
+            })
+
+    # Deduplicate roughly by horse+race
+    seen = set()
+    unique_rows = []
+    for r in rows:
+        key = (r["Horse"], r["Race"])
+        if key not in seen:
+            seen.add(key)
+            unique_rows.append(r)
+    return unique_rows
 
 
 def filter_unique_shorteners(rows, threshold=THRESHOLD):
